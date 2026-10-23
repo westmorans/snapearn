@@ -63,10 +63,20 @@
 
   <script>
     async function startBatch() {
-      const rawNumbers = document.getElementById('phoneNumbers').value;
-      const amount = document.getElementById('amount').value;
-      const reference = document.getElementById('reference').value;
-      const description = document.getElementById('description').value;
+      const phoneInput = document.getElementById('phoneNumbers');
+      const amountInput = document.getElementById('amount');
+      const refInput = document.getElementById('reference');
+      const descInput = document.getElementById('description');
+
+      if (!phoneInput || !amountInput) {
+        alert('Required form elements are missing from the page.');
+        return;
+      }
+
+      const rawNumbers = phoneInput.value;
+      const amount = amountInput.valueAsNumber || Number(amountInput.value);
+      const reference = refInput ? refInput.value : 'BULK';
+      const description = descInput ? descInput.value : 'Batch Push';
 
       const numbers = rawNumbers.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
 
@@ -75,15 +85,19 @@
         return;
       }
 
-      const response = await fetch('/api/enqueue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ numbers, amount, reference, description })
-      });
+      try {
+        const response = await fetch('/api/enqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ numbers, amount, reference, description })
+        });
 
-      const resData = await response.json();
-      if (!response.ok) {
-        alert(resData.error || 'Failed to start batch');
+        const resData = await response.json();
+        if (!response.ok) {
+          alert(resData.error || 'Failed to start batch');
+        }
+      } catch (err) {
+        alert('Network error while queueing requests.');
       }
     }
 
@@ -92,16 +106,21 @@
         const response = await fetch('/api/status');
         const data = await response.json();
 
-        document.getElementById('queueLength').innerText = data.queueLength;
-        document.getElementById('queueStatus').innerText = data.isProcessing ? 'Processing (6s delay)' : 'Idle';
-
+        const queueLengthEl = document.getElementById('queueLength');
+        const queueStatusEl = document.getElementById('queueStatus');
         const logBox = document.getElementById('logBox');
-        logBox.innerHTML = data.logs.map(log => {
-          let classType = 'log-info';
-          if (log.type === 'success') classType = 'log-success';
-          if (log.type === 'error') classType = 'log-error';
-          return `<div class="log-entry ${classType}">[${log.timestamp}] ${log.message}</div>`;
-        }).join('');
+
+        if (queueLengthEl) queueLengthEl.innerText = data.queueLength;
+        if (queueStatusEl) queueStatusEl.innerText = data.isProcessing ? 'Processing (6s delay)' : 'Idle';
+
+        if (logBox && data.logs) {
+          logBox.innerHTML = data.logs.map(log => {
+            let classType = 'log-info';
+            if (log.type === 'success') classType = 'log-success';
+            if (log.type === 'error') classType = 'log-error';
+            return `<div class="log-entry ${classType}">[${log.timestamp}] ${log.message}</div>`;
+          }).join('');
+        }
       } catch (err) {
         console.error('Failed to fetch status', err);
       }
