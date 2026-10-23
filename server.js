@@ -5,7 +5,7 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SNAPEARN_API_KEY = process.env.SNAPEARN_API_KEY;
-const STK_URL = 'https://api.snapearn.co.ke/api/stk-push';
+const STK_URL = 'https://api.snapearn.co.ke/api/stk-push.php';
 const STATUS_URL = 'https://api.snapearn.co.ke/api/transaction.php';
 
 app.use(express.json());
@@ -33,13 +33,12 @@ function formatPhoneNumber(phone) {
   return cleaned;
 }
 
-// Safely parse JSON responses to prevent "unexpected token" crashes
+// Safely parse JSON responses to prevent unexpected token crashes
 async function safeParseResponse(response) {
   const text = await response.text();
   try {
     return JSON.parse(text);
   } catch (e) {
-    // If it's HTML or plaintext, return it as a raw message object
     return { error: 'Non-JSON response received', rawResponse: text.substring(0, 150) };
   }
 }
