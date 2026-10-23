@@ -6,62 +6,120 @@
   <title>SnapEarn Bulk STK Push Dispatcher</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    body { background: #f4f6f9; color: #333; padding: 20px; }
-    .container { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    h1 { margin-bottom: 20px; font-size: 24px; color: #111; }
+    body { background: #f4f6f9; color: #333; display: flex; min-height: 100vh; }
+    
+    /* Sidebar Styles */
+    .sidebar { width: 250px; background: #1e1e2f; color: #fff; padding: 20px; display: flex; flex-direction: column; transition: transform 0.3s ease; z-index: 100; }
+    .sidebar h2 { font-size: 18px; margin-bottom: 25px; color: #00ff66; letter-spacing: 0.5px; }
+    .sidebar a { color: #b8b8d0; text-decoration: none; padding: 10px 15px; border-radius: 5px; margin-bottom: 5px; display: block; font-size: 14px; transition: background 0.2s, color 0.2s; }
+    .sidebar a:hover, .sidebar a.active { background: #2a2a40; color: #fff; }
+
+    /* Main Content Area */
+    .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; }
+    header { background: #fff; padding: 15px 25px; border-bottom: 1px solid #e1e4e8; display: flex; align-items: center; justify-content: space-between; }
+    .hamburger { display: none; background: none; border: none; font-size: 22px; cursor: pointer; color: #333; }
+
+    .container { max-width: 900px; margin: 20px auto; background: #fff; border-radius: 8px; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); width: 92%; }
+    h1 { margin-bottom: 20px; font-size: 22px; color: #111; }
     .form-group { margin-bottom: 15px; }
     label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 14px; }
     input, textarea, button { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
     textarea { height: 120px; resize: vertical; font-family: monospace; }
     .row { display: flex; gap: 15px; }
     .row .form-group { flex: 1; }
-    button { background: #0070f3; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #0051a2; }
+    button.action-btn { background: #0070f3; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+    button.action-btn:hover { background: #0051a2; }
+    
     .status-panel { margin-top: 25px; padding: 15px; background: #eef2f5; border-radius: 5px; }
-    .status-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px; }
-    .log-box { background: #1e1e1e; color: #00ff66; font-family: monospace; padding: 10px; height: 250px; overflow-y: auto; border-radius: 5px; font-size: 12px; }
+    .status-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+    .log-box { background: #1e1e1e; color: #00ff66; font-family: monospace; padding: 10px; height: 220px; overflow-y: auto; border-radius: 5px; font-size: 12px; }
     .log-entry { margin-bottom: 4px; }
     .log-info { color: #8888ff; }
     .log-success { color: #00ff66; }
     .log-error { color: #ff5555; }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .sidebar { position: fixed; height: 100%; transform: translateX(-100%); }
+      .sidebar.open { transform: translateX(0); }
+      .hamburger { display: block; }
+      .row { flex-direction: column; gap: 0; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>SnapEarn STK Push Dispatcher</h1>
 
-    <div class="form-group">
-      <label for="phoneNumbers">Phone Numbers (One per line or comma-separated)</label>
-      <textarea id="phoneNumbers" placeholder="0712345678&#10;0787654321&#10;254700000000"></textarea>
-    </div>
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar" id="sidebar">
+    <h2>SnapEarn Bot</h2>
+    <a href="#" class="active">STK Push Dispatcher</a>
+    <a href="#">Transaction Logs</a>
+    <a href="#">Settings</a>
+  </aside>
 
-    <div class="row">
+  <!-- Main Container -->
+  <div class="main-content">
+    <header>
+      <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
+      <span style="font-weight: 600; font-size: 15px;">Bulk Payment Dashboard</span>
+    </header>
+
+    <div class="container">
+      <h1>STK Push Queue Dispatcher</h1>
+
       <div class="form-group">
-        <label for="amount">Amount (KES)</label>
-        <input type="number" id="amount" value="10" min="1">
+        <label for="phoneNumbers">Phone Numbers (One per line or comma-separated)</label>
+        <textarea id="phoneNumbers" placeholder="0712345678&#10;0787654321&#10;254700000000"></textarea>
       </div>
-      <div class="form-group">
-        <label for="reference">Reference Header</label>
-        <input type="text" id="reference" value="BULK">
-      </div>
-      <div class="form-group">
-        <label for="description">Description</label>
-        <input type="text" id="description" value="Batch Push">
-      </div>
-    </div>
 
-    <button onclick="startBatch()">Start STK Push Queue</button>
-
-    <div class="status-panel">
-      <div class="status-header">
-        <span>Queue Status: <span id="queueStatus">Idle</span></span>
-        <span>Remaining: <span id="queueLength">0</span></span>
+      <div class="row">
+        <div class="form-group">
+          <label for="amount">Amount (KES)</label>
+          <input type="number" id="amount" value="10" min="1">
+        </div>
+        <div class="form-group">
+          <label for="reference">Reference Header</label>
+          <input type="text" id="reference" value="BULK">
+        </div>
+        <div class="form-group">
+          <label for="description">Description</label>
+          <input type="text" id="description" value="Batch Push">
+        </div>
       </div>
-      <div class="log-box" id="logBox"></div>
+
+      <button class="action-btn" onclick="startBatch()">Start STK Push Queue (6s Delay)</button>
+
+      <div class="status-panel">
+        <div class="status-header">
+          <span>Queue Status: <span id="queueStatus">Idle</span></span>
+          <span>Remaining: <span id="queueLength">0</span></span>
+        </div>
+        <div class="log-box" id="logBox"></div>
+      </div>
     </div>
   </div>
 
   <script>
+    // Sidebar Toggle with Null Safety
+    function toggleSidebar() {
+      const sb = document.getElementById('sidebar');
+      if (sb) {
+        sb.classList.toggle('open');
+      }
+    }
+
+    // Close sidebar on outside click (mobile)
+    document.addEventListener('click', function(e) {
+      const sb = document.getElementById('sidebar');
+      if (sb && sb.classList.contains('open') && !sb.contains(e.target)) {
+        const hamburger = document.querySelector('.hamburger');
+        if (!hamburger || !hamburger.contains(e.target)) {
+          sb.classList.remove('open');
+        }
+      }
+    });
+
+    // Batch Dispatch Logic
     async function startBatch() {
       const phoneInput = document.getElementById('phoneNumbers');
       const amountInput = document.getElementById('amount');
