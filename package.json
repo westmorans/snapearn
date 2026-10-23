@@ -1,13 +1,13 @@
 {
-  "name": "snapearn-stk-bot",
+  "name": "stk-push-bot",
   "version": "1.0.0",
-  "description": "Bulk STK Push Dispatcher with Rate Limiting for Snapearn API",
+  "description": "Automated STK push dispatcher with 6-second rate limiting",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
   }
