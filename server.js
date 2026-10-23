@@ -57,20 +57,31 @@ app.post('/api/bulk-stk', async (expressReq, expressRes) => {
   expressRes.setHeader('Cache-Control', 'no-cache');
   expressRes.setHeader('Connection', 'keep-alive');
 
+  // Track if client disconnects to abort further dispatches
+  let isConnected = true;
+  expressReq.on('close', () => {
+    isConnected = false;
+  });
+
   const sendEvent = (data) => {
-    expressRes.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (isConnected) {
+      expressRes.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
   };
 
   sendEvent({ type: 'start', total: numbers.length });
 
   for (let i = 0; i < numbers.length; i++) {
+    if (!isConnected) break; // Stop loop if client disconnected
+
     const rawPhone = numbers[i].trim();
     if (!rawPhone) continue;
 
     const formattedPhone = formatPhone(rawPhone);
 
     try {
-      const apiResponse = await fetch('https://api.snapearn.co.ke/api/stk-push.php', {
+      // Updated URL: removed '.php' to match the correct API endpoint
+      const apiResponse = await fetch('https://api.snapearn.co.ke/api/stk-push', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -106,14 +117,16 @@ app.post('/api/bulk-stk', async (expressReq, expressRes) => {
     }
 
     // 6-second delay between requests (except after the last item)
-    if (i < numbers.length - 1) {
+    if (i < numbers.length - 1 && isConnected) {
       sendEvent({ type: 'delay', seconds: 6 });
       await sleep(6000);
     }
   }
 
-  sendEvent({ type: 'complete', message: 'All dispatches finished.' });
-  expressRes.end();
+  if (isConnected) {
+    sendEvent({ type: 'complete', message: 'All dispatches finished.' });
+    expressRes.end();
+  }
 });
 
 app.listen(PORT, () => {
