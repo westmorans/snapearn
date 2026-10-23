@@ -80,7 +80,6 @@ app.post('/api/bulk-stk', async (expressReq, expressRes) => {
     const formattedPhone = formatPhone(rawPhone);
 
     try {
-      // Updated URL: removed '.php' to match the correct API endpoint
       const apiResponse = await fetch('https://api.snapearn.co.ke/api/stk-push', {
         method: 'POST',
         headers: {
@@ -95,7 +94,17 @@ app.post('/api/bulk-stk', async (expressReq, expressRes) => {
         }),
       });
 
-      const responseData = await apiResponse.json();
+      // Capture raw response text for diagnostic visibility
+      const responseText = await apiResponse.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        responseData = { raw: responseText };
+      }
+
+      // PRINT DIAGNOSTICS TO YOUR TERMINAL WINDOW
+      console.log(`[SnapEarn API Response for ${formattedPhone}] Status: ${apiResponse.status}`, responseData);
 
       sendEvent({
         type: 'progress',
@@ -106,6 +115,7 @@ app.post('/api/bulk-stk', async (expressReq, expressRes) => {
         response: responseData,
       });
     } catch (err) {
+      console.error(`[Network/Fetch Error for ${formattedPhone}]:`, err.message);
       sendEvent({
         type: 'progress',
         index: i + 1,
