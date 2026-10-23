@@ -33,7 +33,17 @@ function formatPhoneNumber(phone) {
   return cleaned;
 }
 
-// Function to query transaction status after push
+// Safely parse JSON responses to prevent "unexpected token" crashes
+async function safeParseResponse(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // If it's HTML or plaintext, return it as a raw message object
+    return { error: 'Non-JSON response received', rawResponse: text.substring(0, 150) };
+  }
+}
+
 async function checkTransactionStatus(transactionId, phone) {
   try {
     addLog(`Checking status for transaction ID: ${transactionId} (${phone})...`, 'info');
@@ -45,7 +55,7 @@ async function checkTransactionStatus(transactionId, phone) {
       }
     });
 
-    const data = await response.json();
+    const data = await safeParseResponse(response);
 
     if (response.ok) {
       addLog(`STATUS CHECK [${phone}]: ${JSON.stringify(data)}`, 'success');
@@ -80,16 +90,14 @@ async function processQueue() {
       })
     });
 
-    const data = await response.json();
+    const data = await safeParseResponse(response);
 
-    if (response.ok) {
+    if (response.ok && !data.error) {
       addLog(`SUCCESS [${task.phone}]: ${JSON.stringify(data)}`, 'success');
       
-      // Extract transaction ID/UUID from response (supports common key names)
       const txnId = data.id || data.transaction_id || data.uuid || data.checkoutRequestID;
       
       if (txnId) {
-        // Wait 15 seconds to give the customer time to enter their PIN, then check status
         setTimeout(() => {
           checkTransactionStatus(txnId, task.phone);
         }, 15000);
@@ -101,7 +109,6 @@ async function processQueue() {
     addLog(`ERROR [${task.phone}]: ${error.message}`, 'error');
   }
 
-  // Enforce 6-second delay between next push dispatch
   if (queue.length > 0) {
     addLog(`Waiting 6 seconds before next dispatch... (${queue.length} remaining)`, 'info');
     setTimeout(() => {
