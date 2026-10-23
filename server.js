@@ -5,7 +5,8 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SNAPEARN_API_KEY = process.env.SNAPEARN_API_KEY;
-const API_URL = 'https://api.snapearn.co.ke/api/stk-push';
+const STK_URL = 'https://api.snapearn.co.ke/api/stk-push';
+const STATUS_URL = 'https://api.snapearn.co.ke/api/transaction.php';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -19,10 +20,9 @@ function addLog(message, type = 'info') {
   const timestamp = new Date().toLocaleTimeString();
   const logEntry = { timestamp, message, type };
   logs.unshift(logEntry);
-  if (logs.length > 100) logs.pop(); // Keep last 100 logs
+  if (logs.length > 100) logs.pop();
 }
 
-// Function to normalize Kenyan phone numbers to 2547XXXXXXXX / 2541XXXXXXXX format
 function formatPhoneNumber(phone) {
   let cleaned = phone.replace(/\D/g, '');
   if (cleaned.startsWith('0')) {
@@ -33,7 +33,30 @@ function formatPhoneNumber(phone) {
   return cleaned;
 }
 
-// Process the queue one item at a time with a 6-second delay
+// Function to query transaction status after push
+async function checkTransactionStatus(transactionId, phone) {
+  try {
+    addLog(`Checking status for transaction ID: ${transactionId} (${phone})...`, 'info');
+    
+    const response = await fetch(`${STATUS_URL}?id=${transactionId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${SNAPEARN_API_KEY}`
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      addLog(`STATUS CHECK [${phone}]: ${JSON.stringify(data)}`, 'success');
+    } else {
+      addLog(`STATUS CHECK FAILED [${phone}]: ${JSON.stringify(data)}`, 'error');
+    }
+  } catch (error) {
+    addLog(`STATUS CHECK ERROR [${phone}]: ${error.message}`, 'error');
+  }
+}
+
 async function processQueue() {
   if (isProcessing || queue.length === 0) return;
 
@@ -43,7 +66,7 @@ async function processQueue() {
   try {
     addLog(`Sending STK push to ${task.phone} for KES ${task.amount}...`, 'info');
 
-    const response = await fetch(API_URL, {
+    const response = await fetch(STK_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${SNAPEARN_API_KEY}`,
@@ -61,6 +84,16 @@ async function processQueue() {
 
     if (response.ok) {
       addLog(`SUCCESS [${task.phone}]: ${JSON.stringify(data)}`, 'success');
+      
+      // Extract transaction ID/UUID from response (supports common key names)
+      const txnId = data.id || data.transaction_id || data.uuid || data.checkoutRequestID;
+      
+      if (txnId) {
+        // Wait 15 seconds to give the customer time to enter their PIN, then check status
+        setTimeout(() => {
+          checkTransactionStatus(txnId, task.phone);
+        }, 15000);
+      }
     } else {
       addLog(`FAILED [${task.phone}]: ${JSON.stringify(data)}`, 'error');
     }
@@ -68,9 +101,9 @@ async function processQueue() {
     addLog(`ERROR [${task.phone}]: ${error.message}`, 'error');
   }
 
-  // Enforce 6-second delay before processing next item
+  // Enforce 6-second delay between next push dispatch
   if (queue.length > 0) {
-    addLog(`Waiting 6 seconds before next dispatch... (${queue.length} remaining in queue)`, 'info');
+    addLog(`Waiting 6 seconds before next dispatch... (${queue.length} remaining)`, 'info');
     setTimeout(() => {
       isProcessing = false;
       processQueue();
@@ -81,7 +114,6 @@ async function processQueue() {
   }
 }
 
-// API Routes
 app.post('/api/enqueue', (req, res) => {
   const { numbers, amount, reference, description } = req.body;
 
@@ -97,12 +129,12 @@ app.post('/api/enqueue', (req, res) => {
   numbers.forEach((rawPhone, index) => {
     const formattedPhone = formatPhoneNumber(rawPhone.toString());
     if (formattedPhone.length === 12) {
-      const ref = reference ? `${reference}-${Date.now()}-${index + 1}` : `REF-${Date.now()}-${index + 1}`;
+      const ref = reference ? `${reference}-${index + 1}` : `BULK-${index + 1}`;
       queue.push({
         phone: formattedPhone,
         amount,
-        reference: ref,
-        description: description || 'Batch Payment'
+        reference: ref.substring(0, 12),
+        description: (description || 'Batch Push').substring(0, 13)
       });
       addedCount++;
     }
