@@ -11,7 +11,6 @@ const STATUS_URL = 'https://api.snapearn.co.ke/api/transaction.php';
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Global queue and processing state
 const queue = [];
 let isProcessing = false;
 const logs = [];
@@ -31,39 +30,6 @@ function formatPhoneNumber(phone) {
     cleaned = '254' + cleaned;
   }
   return cleaned;
-}
-
-// Safely parse JSON responses to prevent unexpected token crashes
-async function safeParseResponse(response) {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return { error: 'Non-JSON response received', rawResponse: text.substring(0, 150) };
-  }
-}
-
-async function checkTransactionStatus(transactionId, phone) {
-  try {
-    addLog(`Checking status for transaction ID: ${transactionId} (${phone})...`, 'info');
-    
-    const response = await fetch(`${STATUS_URL}?id=${transactionId}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${SNAPEARN_API_KEY}`
-      }
-    });
-
-    const data = await safeParseResponse(response);
-
-    if (response.ok) {
-      addLog(`STATUS CHECK [${phone}]: ${JSON.stringify(data)}`, 'success');
-    } else {
-      addLog(`STATUS CHECK FAILED [${phone}]: ${JSON.stringify(data)}`, 'error');
-    }
-  } catch (error) {
-    addLog(`STATUS CHECK ERROR [${phone}]: ${error.message}`, 'error');
-  }
 }
 
 async function processQueue() {
@@ -89,23 +55,29 @@ async function processQueue() {
       })
     });
 
-    const data = await safeParseResponse(response);
+    const responseText = await response.text();
+    addLog(`HTTP Status: ${response.status} ${response.statusText}`, response.ok ? 'info' : 'error');
+    addLog(`Raw Response Length: ${responseText.length} chars`, 'info');
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      data = { error: 'Failed to parse JSON', rawResponse: responseText.trim() || '[Empty Body]' };
+    }
 
     if (response.ok && !data.error) {
       addLog(`SUCCESS [${task.phone}]: ${JSON.stringify(data)}`, 'success');
       
       const txnId = data.id || data.transaction_id || data.uuid || data.checkoutRequestID;
-      
       if (txnId) {
-        setTimeout(() => {
-          checkTransactionStatus(txnId, task.phone);
-        }, 15000);
+        setTimeout(() => checkTransactionStatus(txnId, task.phone), 15000);
       }
     } else {
       addLog(`FAILED [${task.phone}]: ${JSON.stringify(data)}`, 'error');
     }
   } catch (error) {
-    addLog(`ERROR [${task.phone}]: ${error.message}`, 'error');
+    addLog(`NETWORK ERROR [${task.phone}]: ${error.message}`, 'error');
   }
 
   if (queue.length > 0) {
@@ -117,6 +89,19 @@ async function processQueue() {
   } else {
     addLog('Queue processing complete.', 'success');
     isProcessing = false;
+  }
+}
+
+async function checkTransactionStatus(transactionId, phone) {
+  try {
+    const response = await fetch(`${STATUS_URL}?id=${transactionId}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${SNAPEARN_API_KEY}` }
+    });
+    const text = await response.text();
+    addLog(`Status Check HTTP ${response.status}: ${text.substring(0, 100)}`, response.ok ? 'success' : 'error');
+  } catch (error) {
+    addLog(`Status Check Error: ${error.message}`, 'error');
   }
 }
 
@@ -147,20 +132,13 @@ app.post('/api/enqueue', (req, res) => {
   });
 
   addLog(`Enqueued ${addedCount} valid numbers. Queue length: ${queue.length}`, 'info');
-
-  if (!isProcessing) {
-    processQueue();
-  }
+  if (!isProcessing) processQueue();
 
   res.json({ message: `Successfully queued ${addedCount} requests.`, queueLength: queue.length });
 });
 
 app.get('/api/status', (req, res) => {
-  res.json({
-    queueLength: queue.length,
-    isProcessing,
-    logs
-  });
+  res.json({ queueLength: queue.length, isProcessing, logs });
 });
 
 app.listen(PORT, () => {
