@@ -1,144 +1,130 @@
-require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SNAPEARN_API_KEY = process.env.SNAPEARN_API_KEY;
+const API_URL = 'https://api.snapearn.co.ke/api/stk-push';
 
-app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Delay utility function
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Global queue and processing state
+const queue = [];
+let isProcessing = false;
+const logs = [];
 
-// Helper function to format phone numbers to 254XXXXXXXXX
-function formatPhone(phone) {
+function addLog(message, type = 'info') {
+  const timestamp = new Date().toLocaleTimeString();
+  const logEntry = { timestamp, message, type };
+  logs.unshift(logEntry);
+  if (logs.length > 100) logs.pop(); // Keep last 100 logs
+}
+
+// Function to normalize Kenyan phone numbers to 2547XXXXXXXX / 2541XXXXXXXX format
+function formatPhoneNumber(phone) {
   let cleaned = phone.replace(/\D/g, '');
   if (cleaned.startsWith('0')) {
-    cleaned = '254' + cleaned.slice(1);
+    cleaned = '254' + cleaned.substring(1);
   } else if (cleaned.startsWith('7') || cleaned.startsWith('1')) {
     cleaned = '254' + cleaned;
-  } else if (cleaned.startsWith('+254')) {
-    cleaned = cleaned.replace('+254', '254');
   }
   return cleaned;
 }
 
-// Bulk STK Push Endpoint
-app.post('/api/bulk-stk', async (expressReq, expressRes) => {
-  const { numbers, amount, reference, description } = expressReq.body;
-  const apiKey = process.env.SNAPEARN_API_KEY;
+// Process the queue one item at a time with a 6-second delay
+async function processQueue() {
+  if (isProcessing || queue.length === 0) return;
 
-  if (!apiKey) {
-    return expressRes.status(500).json({
-      success: false,
-      message: 'Server missing SNAPEARN_API_KEY environment variable.',
+  isProcessing = true;
+  const task = queue.shift();
+
+  try {
+    addLog(`Sending STK push to ${task.phone} for KES ${task.amount}...`, 'info');
+
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SNAPEARN_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        phone: task.phone,
+        amount: Number(task.amount),
+        reference: task.reference,
+        description: task.description
+      })
     });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      addLog(`SUCCESS [${task.phone}]: ${JSON.stringify(data)}`, 'success');
+    } else {
+      addLog(`FAILED [${task.phone}]: ${JSON.stringify(data)}`, 'error');
+    }
+  } catch (error) {
+    addLog(`ERROR [${task.phone}]: ${error.message}`, 'error');
   }
+
+  // Enforce 6-second delay before processing next item
+  if (queue.length > 0) {
+    addLog(`Waiting 6 seconds before next dispatch... (${queue.length} remaining in queue)`, 'info');
+    setTimeout(() => {
+      isProcessing = false;
+      processQueue();
+    }, 6000);
+  } else {
+    addLog('Queue processing complete.', 'success');
+    isProcessing = false;
+  }
+}
+
+// API Routes
+app.post('/api/enqueue', (req, res) => {
+  const { numbers, amount, reference, description } = req.body;
 
   if (!numbers || !Array.isArray(numbers) || numbers.length === 0) {
-    return expressRes.status(400).json({
-      success: false,
-      message: 'Please provide an array of phone numbers.',
-    });
+    return res.status(400).json({ error: 'Please provide an array of phone numbers.' });
   }
 
-  if (!amount || Number(amount) <= 0) {
-    return expressRes.status(400).json({
-      success: false,
-      message: 'Please provide a valid amount.',
-    });
+  if (!amount || isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Please provide a valid amount.' });
   }
 
-  // Set SSE (Server-Sent Events) headers for live streaming updates to frontend
-  expressRes.setHeader('Content-Type', 'text/event-stream');
-  expressRes.setHeader('Cache-Control', 'no-cache');
-  expressRes.setHeader('Connection', 'keep-alive');
-
-  // Track if client disconnects to abort further dispatches
-  let isConnected = true;
-  expressReq.on('close', () => {
-    isConnected = false;
+  let addedCount = 0;
+  numbers.forEach((rawPhone, index) => {
+    const formattedPhone = formatPhoneNumber(rawPhone.toString());
+    if (formattedPhone.length === 12) {
+      const ref = reference ? `${reference}-${Date.now()}-${index + 1}` : `REF-${Date.now()}-${index + 1}`;
+      queue.push({
+        phone: formattedPhone,
+        amount,
+        reference: ref,
+        description: description || 'Batch Payment'
+      });
+      addedCount++;
+    }
   });
 
-  const sendEvent = (data) => {
-    if (isConnected) {
-      expressRes.write(`data: ${JSON.stringify(data)}\n\n`);
-    }
-  };
+  addLog(`Enqueued ${addedCount} valid numbers. Queue length: ${queue.length}`, 'info');
 
-  sendEvent({ type: 'start', total: numbers.length });
-
-  for (let i = 0; i < numbers.length; i++) {
-    if (!isConnected) break; // Stop loop if client disconnected
-
-    const rawPhone = numbers[i].trim();
-    if (!rawPhone) continue;
-
-    const formattedPhone = formatPhone(rawPhone);
-
-    try {
-      const apiResponse = await fetch('https://api.snapearn.co.ke/api/stk-push', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phone: formattedPhone,
-          amount: Number(amount),
-          reference: reference || 'ORD001',
-          description: description || 'Order Payment',
-        }),
-      });
-
-      // Capture raw response text for diagnostic visibility
-      const responseText = await apiResponse.text();
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        responseData = { raw: responseText };
-      }
-
-      // PRINT DIAGNOSTICS TO YOUR TERMINAL WINDOW
-      console.log(`[SnapEarn API Response for ${formattedPhone}] Status: ${apiResponse.status}`, responseData);
-
-      sendEvent({
-        type: 'progress',
-        index: i + 1,
-        total: numbers.length,
-        phone: formattedPhone,
-        status: apiResponse.ok ? 'SUCCESS' : 'FAILED',
-        response: responseData,
-      });
-    } catch (err) {
-      console.error(`[Network/Fetch Error for ${formattedPhone}]:`, err.message);
-      sendEvent({
-        type: 'progress',
-        index: i + 1,
-        total: numbers.length,
-        phone: formattedPhone,
-        status: 'ERROR',
-        error: err.message,
-      });
-    }
-
-    // 6-second delay between requests (except after the last item)
-    if (i < numbers.length - 1 && isConnected) {
-      sendEvent({ type: 'delay', seconds: 6 });
-      await sleep(6000);
-    }
+  if (!isProcessing) {
+    processQueue();
   }
 
-  if (isConnected) {
-    sendEvent({ type: 'complete', message: 'All dispatches finished.' });
-    expressRes.end();
-  }
+  res.json({ message: `Successfully queued ${addedCount} requests.`, queueLength: queue.length });
+});
+
+app.get('/api/status', (req, res) => {
+  res.json({
+    queueLength: queue.length,
+    isProcessing,
+    logs
+  });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`STK Push Bot listening on port ${PORT}`);
 });
